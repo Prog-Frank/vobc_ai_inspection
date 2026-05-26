@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOBC日志解析与智能巡检系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/dist/ag-grid-community.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f0f2f5; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* 顶部导航 */
+        .navbar { background: #1a1a2e; color: #fff; padding: 0 20px; height: 48px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; position: relative; z-index: 10; }
+        .navbar h1 { font-size: 16px; font-weight: 600; }
+        .navbar .nav-links { display: flex; gap: 8px; }
+        .navbar .nav-links a { 
+            color: #9e9e9e; 
+            text-decoration: none; 
+            padding: 8px 20px; 
+            font-size: 13px; 
+            font-weight: 500; 
+            border-radius: 20px;
+            position: relative; 
+            transition: all 0.25s ease; 
+            background: rgba(255,255,255,0.05);
+        }
+        .navbar .nav-links a:hover { 
+            color: #fff; 
+            background: rgba(79, 195, 247, 0.15);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.15);
+        }
+        .navbar .nav-links a.active { 
+            color: #fff; 
+            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
+            box-shadow: 0 4px 15px rgba(79, 195, 247, 0.4);
+        }
+        .navbar .nav-links a.active:hover { 
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(79, 195, 247, 0.5);
+        }
+        .navbar .right-actions { display: flex; align-items: center; gap: 10px; }
+        .navbar .upload-btn { background: #1976d2; color: #fff; border: none; padding: 5px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .navbar .upload-btn:hover { background: #1565c0; }
+        #fileInput { display: none; }
+        .navbar .file-info { font-size: 12px; color: #aaa; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* 底图背景 — 初始界面可见，业务开始后被内容覆盖 */
+        .bg-map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; opacity: 0.10; pointer-events: none; overflow: hidden; }
+        .bg-map img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* 主布局 — 全屏 */
+        .main-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 8px 12px; gap: 8px; position: relative; z-index: 1; }
+
+        /* 系统选择 + 标红标黄 — 横向全屏，紧凑 */
+        .top-bar { background: #fff; border-radius: 6px; padding: 10px 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); display: none; flex-shrink: 0; }
+        .top-bar-inner { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .top-bar .section-label { font-size: 13px; font-weight: 600; color: #555; white-space: nowrap; }
+        .top-bar .sep { width: 1px; height: 22px; background: #e0e0e0; flex-shrink: 0; }
+
+        /* 系统标签行 */
+        .sys-row { display: flex; align-items: center; gap: 12px; }
+        .sys-tags { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+        .sys-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid #ddd; border-radius: 14px; font-size: 12px; cursor: pointer; transition: all 0.12s; user-select: none; }
+        .sys-tag:hover { border-color: #4fc3f7; background: #e3f2fd; }
+        .sys-tag.selected { border-color: #1976d2; background: #e3f2fd; color: #1565c0; }
+        .sys-tag .cnt { background: #f0f0f0; border-radius: 8px; padding: 1px 6px; font-size: 11px; color: #888; }
+        .sys-tag.selected .cnt { background: #bbdefb; color: #1565c0; }
+
+        /* 标红标黄行 — 另起一行 */
+        .hl-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; }
+        .hl-group { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+        .hl-group select { 
+            padding: 3px 24px 3px 6px; 
+            border: 1px solid #ddd; 
+            border-radius: 3px; 
+            font-size: 12px; 
+            width: 140px;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 4px center;
+            background-size: 14px;
+            appearance: none;
+            cursor: pointer;
+        }
+        .hl-group input { padding: 3px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; width: 80px; }
+        .hl-btn { padding: 3px 10px; border: 1px solid #ddd; border-radius: 3px; background: #fff; cursor: pointer; font-size: 12px; flex-shrink: 0; }
+        .hl-btn:hover { background: #e3f2fd; border-color: #4fc3f7; }
+        .hl-btn.primary { background: #1976d2; color: #fff; border-color: #1976d2; }
+        .hl-btn.primary:hover { background: #1565c0; }
+        .view-btn { padding: 6px 20px !important; font-size: 13px !important; font-weight: 600; }
+
+        /* 内容区 — 字段面板 + 表格 并列 */
+        .content-area { flex: 1; display: flex; gap: 8px; overflow: hidden; }
+
+        /* 字段选择面板 — 左侧 */
+        .field-panel { width: 200px; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); display: none; flex-direction: column; flex-shrink: 0; }
+        .field-panel-header { padding: 8px 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+        .field-panel-header span { font-size: 13px; font-weight: 600; color: #555; }
+        .field-panel-header button { font-size: 11px; color: #1976d2; background: none; border: none; cursor: pointer; padding: 0; }
+        .field-panel-header button:hover { text-decoration: underline; }
+        .field-panel-body { flex: 1; overflow-y: auto; padding: 4px 0; }
+        .field-panel-body label { display: flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+        .field-panel-body label:hover { background: #f5f5f5; }
+        .field-panel-body input[type="checkbox"] { accent-color: #1976d2; }
+        .field-panel-body .field-group { margin-bottom: 4px; }
+        .field-panel-body .field-group-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; color: #1976d2; cursor: pointer; background: #f0f7ff; border-radius: 3px; margin: 0 4px; }
+        .field-panel-body .field-group-header:hover { background: #e3f2fd; }
+        .field-panel-body .field-group-header .toggle-icon { font-size: 10px; color: #666; }
+        .field-panel-body .field-group-items { padding-left: 8px; }
+        .field-panel-body .field-group-items label { padding-left: 18px; }
+
+        /* 表格区 */
+        .grid-area { flex: 1; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); display: none; flex-direction: column; overflow: hidden; }
+        #dataGrid { flex: 1; width: 100%; }
+
+        /* 分页 */
+        .pagination { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-top: 1px solid #eee; flex-shrink: 0; }
+        .pagination button { padding: 3px 10px; border: 1px solid #ddd; border-radius: 3px; background: #fff; cursor: pointer; font-size: 12px; }
+        .pagination button:hover { background: #e3f2fd; }
+        .pagination button:disabled { opacity: 0.4; cursor: default; }
+        .pagination button.current { background: #1976d2; color: #fff; border-color: #1976d2; }
+        .pagination .info { font-size: 12px; color: #666; }
+
+        /* 巡检面板 */
+        .tab-panel { display: none; flex: 1; flex-direction: column; overflow-y: auto; background: #fff; border-radius: 6px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        .tab-panel h2 { font-size: 15px; margin-bottom: 12px; }
+        .inspection-result { border: 1px solid #e0e0e0; border-radius: 4px; margin-top: 8px; }
+        .inspection-result .result-header { background: #f5f5f5; padding: 6px 10px; font-weight: 600; font-size: 13px; }
+        .inspection-result .result-body { padding: 8px 10px; font-size: 13px; }
+        .severity-critical { color: #d32f2f; }
+        .severity-warning { color: #f57c00; }
+        .severity-info { color: #1976d2; }
+
+        /* 案例库表格 */
+        .case-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .case-table th { background: #f5f5f5; padding: 8px; text-align: left; }
+        .case-table td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+        .case-table button { font-size: 12px; cursor: pointer; background: none; border: 1px solid #ddd; border-radius: 3px; padding: 2px 8px; }
+        .case-table .del-btn { color: #d32f2f; border-color: #ef9a9a; }
+
+        /* 模态框 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #fff; border-radius: 8px; padding: 20px; width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal h3 { margin-bottom: 14px; font-size: 15px; }
+        .modal label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; margin-top: 10px; }
+        .modal input, .modal textarea, .modal select { width: 100%; padding: 5px 8px; border: 1px solid #ddd; border-radius: 3px; font-size: 13px; }
+        .modal textarea { height: 50px; resize: vertical; }
+        .modal .actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+        .modal .actions button { padding: 5px 16px; border-radius: 3px; border: 1px solid #ddd; cursor: pointer; font-size: 13px; }
+
+        /* 解析提示条 */
+        .parse-banner { display: none; align-items: center; gap: 10px; padding: 10px 16px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1565c0; }
+        .parse-banner.show { display: flex; }
+        .parse-banner .dots span { animation: blink 1.4s infinite; opacity: 0; font-weight: bold; }
+        .parse-banner .dots span:nth-child(1) { animation-delay: 0s; }
+        .parse-banner .dots span:nth-child(2) { animation-delay: 0.2s; }
+        .parse-banner .dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%,80%,100% { opacity: 0; } 40% { opacity: 1; } }
+
+        /* 加载遮罩 */
+        .loading-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.7); z-index: 999; justify-content: center; align-items: center; }
+        .loading-overlay.show { display: flex; }
+        .spinner { border: 3px solid #e0e0e0; border-top-color: #1976d2; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 行样式 */
+        .row-red { background-color: #ffebee !important; }
+        .row-red:hover { background-color: #ffcdd2 !important; }
+        .row-yellow { background-color: #fffde7 !important; }
+        .row-yellow:hover { background-color: #fff9c4 !important; }
+    </style>
+</head>
+<body>
+
+<div class="navbar">
+    <h1><img src="/static/logo.png" style="height:32px;margin-right:8px;vertical-align:middle;">VOBC日志解析与智能巡检系统</h1>
+    <div class="nav-links">
+        <a href="#" class="active" onclick="showSection('parse', this)">日志解析</a>
+        <a href="#" onclick="showSection('inspection', this)">智能巡检</a>
+        <a href="#" onclick="showSection('plotting', this)">数据绘制</a>
+        <a href="#" onclick="showSection('cases', this)">案例库</a>
+    </div>
+    <div class="right-actions">
+        <span class="file-info" id="fileInfo"></span>
+        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">📁 上传日志</button>
+        <input type="file" id="fileInput" multiple accept=".txt,.log,.bin">
+    </div>
+</div>
+
+<!-- 底图背景 -->
+<div class="bg-map" id="bgMap">
+    <img src="/static/ditu.jpg" alt="">
+</div>
+
+<div class="main-container">
+
+    <!-- 解析提示条 -->
+    <div class="parse-banner" id="parseBanner">
+        <span>⏳ 正在解析日志，请稍候</span>
+        <span class="dots"><span>.</span><span>.</span><span>.</span></span>
+    </div>
+
+    <!-- 顶栏：系统选择 + 标红标黄 + 操作按钮 — 横向全屏 -->
+    <div class="top-bar" id="topBar">
+        <div class="top-bar-inner">
+            <!-- 第一行：系统选择 -->
+            <div class="sys-row">
+                <span class="section-label">系统：</span>
+                <div class="sys-tags" id="sysTags"></div>
+                <button class="hl-btn primary view-btn" onclick="loadSelectedSystems()">查看选中系统</button>
+            </div>
+            <!-- 第二行：标红标黄 + 操作 -->
+            <div class="hl-row">
+                <div class="hl-group">
+                    <span>标红：</span>
+                    <select id="redField" onchange="applyHighlight()"><option value="">字段</option></select>
+                    <input id="redValue" placeholder="值" oninput="applyHighlight()">
+                </div>
+                <div class="sep"></div>
+                <div class="hl-group">
+                    <span>标黄：</span>
+                    <select id="yellowField" onchange="applyHighlight()"><option value="">字段</option></select>
+                </div>
+                <div class="sep"></div>
+                <button class="hl-btn" onclick="saveToCaseLib()">💾 案例</button>
+                <button class="hl-btn" onclick="exportData()">📤 导出</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 内容区：字段面板 + 表格 并列 -->
+    <div class="content-area" id="contentArea">
+
+        <!-- 字段选择面板 — 左侧 -->
+        <div class="field-panel" id="fieldPanel">
+            <div class="field-panel-header">
+                <span>字段选择</span>
+                <div>
+                    <button onclick="selectAllFields()">全选</button>
+                    <button onclick="clearAllFields()" style="margin-left:4px;">清除</button>
+                </div>
+            </div>
+            <div style="padding:4px 8px;border-bottom:1px solid #eee;">
+                <input type="text" id="fieldSearch" placeholder="🔍 搜索字段..." oninput="filterFields()" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;font-size:12px;">
+            </div>
+            <div class="field-panel-body" id="fieldList"></div>
+        </div>
+
+        <!-- 表格区 -->
+        <div class="grid-area" id="gridArea">
+            <div id="dataGrid" class="ag-theme-alpine"></div>
+            <div class="pagination" id="pagination"></div>
+        </div>
+
+        <!-- 巡检面板 -->
+        <div class="tab-panel" id="inspectionPanel">
+            <h2>🔍 智能巡检</h2>
+            <div style="margin-bottom:12px;">
+                <button class="hl-btn primary" onclick="runInspection()">开始巡检</button>
+                <span style="font-size:12px;color:#888;margin-left:6px;">检查当前已选系统的日志</span>
+            </div>
+            <div id="inspectionRules"></div>
+            <div id="inspectionResults"></div>
+        </div>
+
+        <!-- 数据绘制面板 -->
+        <div class="tab-panel" id="plottingPanel" style="flex-direction: row;">
+            <div style="width: 280px; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); display: flex; flex-direction: column; flex-shrink: 0;">
+                <div class="field-panel-header">
+                    <span>数据绘制设置</span>
+                    <button onclick="clearPlotSelection()">清除</button>
+                </div>
+                <div class="field-panel-body" style="padding: 8px;">
+                    <!-- 系统选择 -->
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block;">选择系统</label>
+                        <select id="plotSystem" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:12px;" onchange="loadPlotFields()">
+                            <option value="">请选择系统</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 图表类型 -->
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block;">图表类型</label>
+                        <select id="plotType" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:12px;">
+                            <option value="line">曲线图</option>
+                            <option value="histogram">直方图</option>
+                            <option value="scatter">散点图</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 字段搜索 -->
+                    <div style="margin-bottom: 8px;">
+                        <input type="text" id="plotFieldSearch" placeholder="搜索字段..." 
+                               style="width:100%;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:12px;"
+                               oninput="filterPlotFields()">
+                    </div>
+                    
+                    <!-- 字段选择 -->
+                    <div style="margin-bottom: 4px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <label style="font-size:12px;color:#666;">选择字段（可多选）</label>
+                            <span style="font-size:11px;">
+                                <button onclick="selectAllPlotFields()" style="color:#1976d2;background:none;border:none;cursor:pointer;margin-right:8px;">全选</button>
+                                <button onclick="clearAllPlotFields()" style="color:#1976d2;background:none;border:none;cursor:pointer;">清除</button>
+                            </span>
+                        </div>
+                    </div>
+                    <div id="plotFieldList" style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 3px;">
+                    </div>
+                    
+                    <!-- 映射配置按钮 -->
+                    <button onclick="toggleMappingPanel()" style="width:100%;margin-top:12px;padding:6px;border:1px solid #ddd;border-radius:3px;font-size:12px;background:#fff;color:#666;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;" id="mappingBtn">
+                        ⚙ 映射配置
+                    </button>
+                    
+                    <!-- 映射配置面板 -->
+                    <div id="mappingPanel" style="margin-top:8px;padding:8px;border:1px solid #ddd;border-radius:3px;background:#fafafa;display:none;">
+                        <div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:500;">文字字段映射设置</div>
+                        <!-- 搜索框 -->
+                        <input type="text" id="mappingSearch" placeholder="🔍 搜索字段..." 
+                               oninput="filterMappingFields()" 
+                               style="width:100%;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:12px;margin-bottom:8px;">
+                        <div id="mappingContent" style="max-height: 200px; overflow-y: auto;">
+                            <div style="font-size:11px;color:#999;text-align:center;padding:20px;">请先选择系统加载映射配置</div>
+                        </div>
+                        <div style="margin-top:8px;display:flex;gap:4px;">
+                            <button onclick="saveMappings()" style="flex:1;padding:4px;font-size:11px;background:#1976d2;color:#fff;border:none;border-radius:3px;cursor:pointer;">保存映射</button>
+                            <button onclick="resetMappings()" style="flex:1;padding:4px;font-size:11px;background:#fff;color:#666;border:1px solid #ddd;border-radius:3px;cursor:pointer;">重置</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 绘制按钮 -->
+                    <button class="hl-btn primary" onclick="drawPlot()" style="width:100%;margin-top:12px;padding:6px;">📈 绘制图表</button>
+                    
+                    <!-- 提示 -->
+                    <div style="font-size:11px;color:#888;margin-top:8px;">
+                        提示：直方图仅支持单字段，散点图需要两个字段
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 图表显示区域 -->
+            <div style="flex: 1; display: flex; flex-direction: column; margin-left: 12px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <h2>📊 数据图表</h2>
+                    <div style="font-size:12px;color:#666;" id="plotInfo"></div>
+                </div>
+                
+                <!-- 状态条区域 -->
+                <div id="statusBar" style="margin-bottom: 8px; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); padding: 10px; display: none;">
+                    <div style="font-size:12px;color:#666;margin-bottom:6px;">系统状态</div>
+                    <div id="statusItems" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                </div>
+                
+                <!-- 图表区域 -->
+                <div id="plotResult" style="flex: 1; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); overflow-x: auto; overflow-y: auto;">
+                    <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #999;">
+                        请选择系统和字段后绘制图表
+                    </div>
+                </div>
+                
+                <!-- 事件列表 -->
+                <div id="eventList" style="margin-top: 8px; background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); padding: 10px; display: none; max-height: 150px; overflow-y: auto;">
+                    <div style="font-size:12px;color:#666;margin-bottom:6px;">📌 事件标记</div>
+                    <div id="eventItems"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 案例库面板 -->
+        <div class="tab-panel" id="casePanel">
+            <h2>📚 案例库</h2>
+            <div id="caseList"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 加载遮罩 -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+</div>
+
+<!-- 案例录入模态框 -->
+<div class="modal-overlay" id="caseModal">
+    <div class="modal">
+        <h3>录入案例库</h3>
+        <label>系统</label><input id="caseSystem" readonly>
+        <label>序列号</label><input id="caseSerialNo" readonly>
+        <label>时间</label><input id="caseTime" readonly>
+        <label>故障原因</label><textarea id="caseReason" placeholder="请描述故障原因"></textarea>
+        <label>故障现象</label><textarea id="casePhenomenon" placeholder="请描述故障现象"></textarea>
+        <label>处置方法</label><textarea id="caseHandling" placeholder="请描述处置方法"></textarea>
+        <label>列车号</label><input id="caseTrainNo" placeholder="如：0612">
+        <label>故障字段（自动填充选中行）</label>
+        <div id="caseFields" style="max-height:150px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:8px;font-size:12px;"></div>
+        <div class="actions">
+            <button onclick="closeCaseModal()">取消</button>
+            <button style="background:#1976d2;color:#fff;border-color:#1976d2;" onclick="submitCase()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// 全局状态
+// ============================================================
+let currentSessionId = '';
+let selectedSystems = [];
+let currentSystems = [];  // 当前已解析的系统列表
+let currentFieldSystems = {};  // 字段所属系统映射
+let currentPage = 1;
+const PAGE_SIZE = 10000;
+let gridApi = null;
+let allColumns = [];
+let selectedFields = [];
+let currentData = [];
+let currentSection = 'parse';
+let plotSelectedFields = [];  // 绘图页面选中的字段
+
+// ============================================================
+// 上传
+// ============================================================
+const fileInput = document.getElementById('fileInput');
+fileInput.addEventListener('change', e => { if (e.target.files.length) uploadFiles(e.target.files); });
+
+async function uploadFiles(files) {
+    document.getElementById('parseBanner').classList.add('show');
+    document.getElementById('parseBanner').querySelector('span:first-child').textContent = '⏳ 正在上传并解析日志，请稍候';
+    const formData = new FormData();
+    for (const f of files) formData.append('files', f);
+
+    try {
+        const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.detail || '上传失败'); return; }
+
+        currentSessionId = data.session_id;
+        document.getElementById('fileInfo').textContent =
+            `${data.file_name} | ${data.total_normal} 帧`;
+
+        renderSystemTags(data.detected);
+        document.getElementById('topBar').style.display = 'block';
+
+        // 自动切到解析视图
+        showSection('parse', document.querySelector('.nav-links a'));
+    } catch (e) {
+        alert('上传失败: ' + e.message);
+    } finally {
+        document.getElementById('parseBanner').classList.remove('show');
+        document.getElementById('parseBanner').querySelector('span:first-child').textContent = '⏳ 正在解析日志，请稍候';
+        fileInput.value = '';
+    }
+}
+
+// ============================================================
+// 系统选择 — 紧凑标签
+// ============================================================
+function renderSystemTags(grouped) {
+    const container = document.getElementById('sysTags');
+    container.innerHTML = '';
+    for (const [board, systems] of Object.entries(grouped)) {
+        for (const s of systems) {
+            const tag = document.createElement('span');
+            tag.className = 'sys-tag';
+            tag.dataset.name = s.name;
+            tag.innerHTML = `${s.name} <span class="cnt">${s.count}</span>`;
+            tag.onclick = () => {
+                tag.classList.toggle('selected');
+            };
+            container.appendChild(tag);
+        }
+    }
+}
+
+async function loadSelectedSystems() {
+    const tags = document.querySelectorAll('.sys-tag.selected');
+    if (!tags.length) { alert('请至少选择一个系统'); return; }
+
+    selectedSystems = Array.from(tags).map(t => t.dataset.name);
+    currentPage = 1;
+    selectedFields = [];
+    document.getElementById('parseBanner').classList.add('show');
+    try {
+        await loadPage();
+    } finally {
+        document.getElementById('parseBanner').classList.remove('show');
+    }
+}
+
+// ============================================================
+// 数据加载 & ag-Grid
+// ============================================================
+async function loadPage() {
+    const systemParam = selectedSystems.join(',');
+
+    document.getElementById('fieldPanel').style.display = 'flex';
+    document.getElementById('gridArea').style.display = 'flex';
+
+    // 隐藏底图
+    document.getElementById('bgMap').style.display = 'none';
+
+    // 隐藏巡检/案例面板
+    document.getElementById('inspectionPanel').style.display = 'none';
+    document.getElementById('casePanel').style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                system: systemParam,
+                page: currentPage,
+                page_size: PAGE_SIZE
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.detail || '加载失败'); return; }
+
+        currentData = data.data;
+        allColumns = data.columns || [];
+        currentSystems = data.systems || [];
+        currentFieldSystems = data.field_systems || {};  // 存储字段所属系统
+
+        if (selectedFields.length === 0) {
+            selectedFields = allColumns.filter(c => !c.startsWith('__')).slice(0, 5);
+        }
+
+        renderGrid();
+        renderPagination(data.total, data.page, data.pages);
+        updateFieldPanel();
+        updateHighlightDropdowns();
+    } catch (e) {
+        alert('加载失败: ' + e.message);
+    }
+}
+
+function renderGrid() {
+    const visibleCols = selectedFields.length > 0 ? selectedFields : allColumns.filter(c => !c.startsWith('__'));
+
+    const colDefs = [{
+        headerName: '', field: '__selected__', width: 46, pinned: 'left',
+        headerCheckboxSelection: true, checkboxSelection: true,
+        suppressMovable: true, suppressMenu: true,
+    }];
+
+    for (const col of visibleCols) {
+        if (col.startsWith('__')) continue;
+        colDefs.push({
+            headerName: col, field: col,
+            sortable: true, filter: true, resizable: true,
+            minWidth: 90,
+        });
+    }
+
+    if (gridApi) {
+        gridApi.setGridOption('columnDefs', colDefs);
+        gridApi.setGridOption('rowData', currentData);
+    } else {
+        gridApi = agGrid.createGrid(document.querySelector('#dataGrid'), {
+            columnDefs: colDefs,
+            rowData: currentData,
+            defaultColDef: { sortable: true, filter: true, resizable: true },
+            rowSelection: 'multiple',
+            suppressRowClickSelection: true,
+            animateRows: false,
+            getRowClass: params => {
+                const classes = [];
+                const redField = document.getElementById('redField').value;
+                const redValue = document.getElementById('redValue').value;
+                if (redField && redValue && params.data) {
+                    if (String(params.data[redField]) === redValue) classes.push('row-red');
+                }
+                if (params.data && params.data.__yellow__) classes.push('row-yellow');
+                return classes.length ? classes.join(' ') : null;
+            },
+        });
+    }
+}
+
+function renderPagination(total, page, pages) {
+    const c = document.getElementById('pagination');
+    c.innerHTML = '';
+    if (pages <= 1) {
+        c.innerHTML = `<span class="info">共 ${total} 条</span>`;
+        return;
+    }
+
+    const info = document.createElement('span');
+    info.className = 'info';
+    info.textContent = `共 ${total} 条，第 ${page}/${pages} 页`;
+    c.appendChild(info);
+
+    for (let i = 1; i <= pages; i++) {
+        if (pages > 10 && Math.abs(i - page) > 3 && i !== 1 && i !== pages) {
+            if (i === page - 4 || i === page + 4) {
+                const d = document.createElement('span');
+                d.textContent = '...'; d.style.cssText = 'margin:0 2px;color:#888;font-size:12px;';
+                c.appendChild(d);
+            }
+            continue;
+        }
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        if (i === page) btn.className = 'current';
+        btn.onclick = () => {
+            currentPage = i;
+            document.getElementById('parseBanner').classList.add('show');
+            loadPage().finally(() => document.getElementById('parseBanner').classList.remove('show'));
+        };
+        c.appendChild(btn);
+    }
+}
+
+// ============================================================
+// 字段选择面板 — 左侧
+// ============================================================
+function updateFieldPanel() {
+    const container = document.getElementById('fieldList');
+    container.innerHTML = '';
+    const visibleCols = allColumns.filter(c => !c.startsWith('__'));
+    const searchVal = (document.getElementById('fieldSearch').value || '').toLowerCase();
+
+    // 多系统时按系统分组显示
+    if (currentSystems.length > 1 && Object.keys(currentFieldSystems).length > 0) {
+        // 按系统分组
+        const groupedFields = {};
+        for (const sys of currentSystems) {
+            groupedFields[sys] = [];
+        }
+        // 将字段分配到对应系统
+        for (const col of visibleCols) {
+            const systems = currentFieldSystems[col] || [];
+            for (const sys of systems) {
+                if (groupedFields[sys]) {
+                    groupedFields[sys].push(col);
+                }
+            }
+        }
+
+        // 渲染分组
+        for (const [sysName, fields] of Object.entries(groupedFields)) {
+            if (fields.length === 0) continue;
+
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'field-group';
+
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'field-group-header';
+            headerDiv.innerHTML = `<span class="toggle-icon">▼</span> ${sysName}`;
+            headerDiv.onclick = () => {
+                const items = groupDiv.querySelector('.field-group-items');
+                const icon = headerDiv.querySelector('.toggle-icon');
+                items.style.display = items.style.display === 'none' ? '' : 'none';
+                icon.textContent = items.style.display === 'none' ? '▶' : '▼';
+            };
+
+            const itemsDiv = document.createElement('div');
+            itemsDiv.className = 'field-group-items';
+
+            for (const col of fields) {
+                const match = !searchVal || col.toLowerCase().includes(searchVal);
+                const label = document.createElement('label');
+                label.style.display = match ? '' : 'none';
+                label.dataset.name = col.toLowerCase();
+                const checked = selectedFields.includes(col) ? 'checked' : '';
+                label.innerHTML = `<input type="checkbox" value="${col}" ${checked}> ${col}`;
+                label.querySelector('input').addEventListener('change', e => {
+                    if (e.target.checked) selectedFields.push(col);
+                    else selectedFields = selectedFields.filter(f => f !== col);
+                    renderGrid();
+                    applyHighlight();
+                });
+                itemsDiv.appendChild(label);
+            }
+
+            groupDiv.appendChild(headerDiv);
+            groupDiv.appendChild(itemsDiv);
+            container.appendChild(groupDiv);
+        }
+    } else {
+        // 单系统或无分组信息时，平铺显示
+        for (const col of visibleCols) {
+            const match = !searchVal || col.toLowerCase().includes(searchVal);
+            const label = document.createElement('label');
+            label.style.display = match ? '' : 'none';
+            label.dataset.name = col.toLowerCase();
+            const checked = selectedFields.includes(col) ? 'checked' : '';
+            label.innerHTML = `<input type="checkbox" value="${col}" ${checked}> ${col}`;
+            label.querySelector('input').addEventListener('change', e => {
+                if (e.target.checked) selectedFields.push(col);
+                else selectedFields = selectedFields.filter(f => f !== col);
+                renderGrid();
+                applyHighlight();
+            });
+            container.appendChild(label);
+        }
+    }
+}
+
+function filterFields() {
+    const searchVal = (document.getElementById('fieldSearch').value || '').toLowerCase();
+    const labels = document.querySelectorAll('#fieldList label');
+    const groups = document.querySelectorAll('#fieldList .field-group');
+
+    // 多系统分组模式
+    if (groups.length > 0) {
+        groups.forEach(group => {
+            const groupLabels = group.querySelectorAll('label');
+            const hasMatch = Array.from(groupLabels).some(l => l.dataset.name.includes(searchVal));
+            group.style.display = !searchVal || hasMatch ? '' : 'none';
+            groupLabels.forEach(l => {
+                l.style.display = !searchVal || l.dataset.name.includes(searchVal) ? '' : 'none';
+            });
+        });
+    } else {
+        // 平铺模式
+        labels.forEach(l => {
+            l.style.display = l.dataset.name.includes(searchVal) ? '' : 'none';
+        });
+    }
+}
+
+function selectAllFields() {
+    selectedFields = allColumns.filter(c => !c.startsWith('__'));
+    updateFieldPanel();
+    renderGrid();
+    applyHighlight();
+}
+
+function clearAllFields() {
+    selectedFields = [];
+    updateFieldPanel();
+    renderGrid();
+    applyHighlight();
+}
+
+function updateHighlightDropdowns() {
+    const visibleCols = allColumns.filter(c => !c.startsWith('__'));
+    for (const selId of ['redField', 'yellowField']) {
+        const sel = document.getElementById(selId);
+        const curVal = sel.value;
+        sel.innerHTML = '<option value="">字段</option>';
+        for (const col of visibleCols) {
+            const opt = document.createElement('option');
+            opt.value = col; opt.textContent = col;
+            sel.appendChild(opt);
+        }
+        if (curVal) sel.value = curVal;
+    }
+}
+
+// ============================================================
+// 标红 & 标黄
+// ============================================================
+function applyHighlight() {
+    if (!gridApi || !currentData.length) return;
+
+    const yellowField = document.getElementById('yellowField').value;
+    if (yellowField) {
+        let prevVal = null;
+        for (const row of currentData) {
+            const curVal = row[yellowField];
+            row.__yellow__ = (prevVal !== null && curVal !== prevVal);
+            prevVal = curVal;
+        }
+    } else {
+        for (const row of currentData) row.__yellow__ = false;
+    }
+
+    gridApi.redrawRows();
+}
+
+// ============================================================
+// 页面切换
+// ============================================================
+function showSection(section, linkEl) {
+    currentSection = section;
+    document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+    if (linkEl) linkEl.classList.add('active');
+
+    // 控制面板显隐
+    const fieldPanel = document.getElementById('fieldPanel');
+    const gridArea = document.getElementById('gridArea');
+    const inspPanel = document.getElementById('inspectionPanel');
+    const casePanel = document.getElementById('casePanel');
+    const plotPanel = document.getElementById('plottingPanel');
+
+    fieldPanel.style.display = (section === 'parse' && gridApi) ? 'flex' : 'none';
+    gridArea.style.display = (section === 'parse' && gridApi) ? 'flex' : 'none';
+    inspPanel.style.display = section === 'inspection' ? 'flex' : 'none';
+    casePanel.style.display = section === 'cases' ? 'flex' : 'none';
+    plotPanel.style.display = section === 'plotting' ? 'flex' : 'none';
+
+    if (section === 'inspection') loadInspectionRules();
+    if (section === 'cases') loadCaseList();
+    if (section === 'plotting') syncPlotSystem();
+}
+
+// ============================================================
+// 智能巡检
+// ============================================================
+async function loadInspectionRules() {
+    try {
+        const resp = await fetch('/api/rules/inspection');
+        const data = await resp.json();
+        const container = document.getElementById('inspectionRules');
+        container.innerHTML = '';
+        for (const [cat, rules] of Object.entries(data.grouped || {})) {
+            const div = document.createElement('div');
+            div.innerHTML = `<h3 style="font-size:13px;margin:8px 0;color:#555;">${cat}</h3>` +
+                rules.map(r => `<label style="display:flex;gap:5px;align-items:center;padding:3px 0;font-size:12px;">
+                    <input type="checkbox" value="${r.file}" checked> ${r.name} (${r.system}) - ${r.severity}
+                </label>`).join('');
+            container.appendChild(div);
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function runInspection() {
+    if (!currentSessionId) { alert('请先上传日志'); return; }
+    const selectedRules = Array.from(document.querySelectorAll('#inspectionRules input:checked')).map(i => i.value);
+
+    try {
+        const resp = await fetch('/api/inspection/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                systems: selectedSystems,
+                selected_rules: selectedRules,
+            })
+        });
+        const data = await resp.json();
+        renderInspectionResults(data);
+    } catch (e) { alert('巡检失败: ' + e.message); }
+}
+
+function renderInspectionResults(data) {
+    const container = document.getElementById('inspectionResults');
+    const s = data.summary || {};
+    container.innerHTML = `
+        <div style="margin:10px 0;padding:10px;background:#f5f5f5;border-radius:4px;font-size:13px;">
+            <strong>摘要：</strong>
+            共 ${s.total || 0} 条，
+            <span class="severity-critical">严重 ${s.critical || 0}</span>，
+            <span class="severity-warning">警告 ${s.warning || 0}</span>
+        </div>
+    ` + (data.results || []).map(r => `
+        <div class="inspection-result">
+            <div class="result-header">
+                <span class="severity-${r.severity}">[${r.severity}]</span>
+                ${r.rule_name} — ${r.system} — ${r.time || ''}
+            </div>
+            <div class="result-body">
+                <p>${r.message}</p>
+                ${r.suggestion ? `<p style="color:#888;font-size:12px;">建议：${r.suggestion}</p>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// ============================================================
+// 案例库
+// ============================================================
+async function loadCaseList(page = 1) {
+    try {
+        const resp = await fetch(`/api/cases?page=${page}&size=20`);
+        const data = await resp.json();
+        const container = document.getElementById('caseList');
+        container.innerHTML = `
+            <table class="case-table">
+                <tr><th>ID</th><th>系统</th><th>故障原因</th><th>列车</th><th>时间</th><th>操作</th></tr>
+                ${data.cases.map(c => `<tr>
+                    <td>${c.id}</td>
+                    <td>${c.system}</td>
+                    <td>${(c.fault_reason || '').substring(0, 30)}</td>
+                    <td>${c.train_no}</td>
+                    <td>${c.event_time || c.created_at}</td>
+                    <td><button onclick="viewCase(${c.id})">查看</button>
+                        <button class="del-btn" onclick="deleteCaseById(${c.id})">删除</button></td>
+                </tr>`).join('')}
+            </table>
+            <div style="margin-top:8px;font-size:12px;color:#888;">共 ${data.total} 条</div>
+        `;
+    } catch (e) { console.error(e); }
+}
+
+async function viewCase(id) {
+    try {
+        const resp = await fetch(`/api/cases/${id}`);
+        const data = await resp.json();
+        alert(JSON.stringify(data, null, 2));
+    } catch (e) { alert('查看失败'); }
+}
+
+async function deleteCaseById(id) {
+    if (!confirm('确认删除？')) return;
+    try {
+        await fetch(`/api/cases/${id}`, { method: 'DELETE' });
+        loadCaseList();
+    } catch (e) { alert('删除失败'); }
+}
+
+// ============================================================
+// 存入案例库
+// ============================================================
+function saveToCaseLib() {
+    if (!gridApi) { alert('请先加载数据'); return; }
+    const selected = gridApi.getSelectedRows();
+    if (!selected.length) { alert('请先勾选要保存的行'); return; }
+
+    const row = selected[0];
+    document.getElementById('caseSystem').value = selectedSystems[0] || '';
+    document.getElementById('caseSerialNo').value = row['序列号'] || '';
+    document.getElementById('caseTime').value = row['时间'] || '';
+
+    const fieldsDiv = document.getElementById('caseFields');
+    fieldsDiv.innerHTML = '';
+    for (const [k, v] of Object.entries(row)) {
+        if (k.startsWith('__')) continue;
+        const label = document.createElement('label');
+        label.style.cssText = 'display:flex;gap:4px;align-items:center;padding:2px 0;';
+        label.innerHTML = `<input type="checkbox" checked data-field="${k}"> <b>${k}:</b> ${v}`;
+        fieldsDiv.appendChild(label);
+    }
+
+    document.getElementById('caseModal').classList.add('show');
+}
+
+function closeCaseModal() {
+    document.getElementById('caseModal').classList.remove('show');
+}
+
+async function submitCase() {
+    const fields = [];
+    const selected = gridApi.getSelectedRows();
+    if (!selected.length) return;
+    const row = selected[0];
+
+    document.querySelectorAll('#caseFields input:checked').forEach(cb => {
+        const fieldName = cb.dataset.field;
+        fields.push({ name: fieldName, value: row[fieldName] || '', is_fault: true });
+    });
+
+    try {
+        const resp = await fetch('/api/cases', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                system: document.getElementById('caseSystem').value,
+                serial_no: document.getElementById('caseSerialNo').value,
+                fault_reason: document.getElementById('caseReason').value,
+                fault_phenomenon: document.getElementById('casePhenomenon').value,
+                handling: document.getElementById('caseHandling').value,
+                train_no: document.getElementById('caseTrainNo').value,
+                event_time: document.getElementById('caseTime').value,
+                raw_log: JSON.stringify(selected.slice(0, 5)),
+                fields: fields,
+            })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            alert('案例已保存，ID: ' + data.id);
+            closeCaseModal();
+        } else {
+            alert('保存失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+// ============================================================
+// 导出
+// ============================================================
+function exportData() {
+    if (!currentSessionId || !selectedSystems.length) { alert('请先加载数据'); return; }
+    window.open(`/api/export?session_id=${currentSessionId}&system=${selectedSystems.join(',')}&format=csv`, '_blank');
+}
+
+// ============================================================
+// 数据绘制
+// ============================================================
+let allPlotFields = [];  // 存储所有字段
+
+async function loadPlotFields() {
+    const system = document.getElementById('plotSystem').value;
+    const fieldList = document.getElementById('plotFieldList');
+    fieldList.innerHTML = '';
+    allPlotFields = [];
+    
+    if (!system || !currentSessionId) {
+        fieldList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">请选择系统</div>';
+        return;
+    }
+    
+    try {
+        const resp = await fetch('/api/get_fields', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentSessionId, system: system })
+        });
+        const data = await resp.json();
+        if (data.fields && data.fields.length > 0) {
+            allPlotFields = data.fields;
+            renderPlotFieldList(data.fields);
+        } else {
+            fieldList.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">该系统无可用字段</div>';
+        }
+    } catch (e) { 
+        console.error('加载字段失败:', e); 
+        fieldList.innerHTML = '<div style="padding:8px;color:#f00;font-size:12px;">加载字段失败</div>';
+    }
+    
+    // 加载映射配置
+    loadMappings();
+}
+
+// 映射相关变量
+let defaultMappings = {};  // 默认映射（从配置文件读取）
+let customMappings = {};    // 用户自定义映射（存储在 localStorage）
+
+function toggleMappingPanel() {
+    const panel = document.getElementById('mappingPanel');
+    const btn = document.getElementById('mappingBtn');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        btn.style.background = '#f0f0f0';
+    } else {
+        panel.style.display = 'none';
+        btn.style.background = '#fff';
+    }
+}
+
+async function loadMappings() {
+    const system = document.getElementById('plotSystem').value;
+    if (!system || !currentSessionId) return;
+    
+    try {
+        const resp = await fetch('/api/get_mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentSessionId, system: system })
+        });
+        const data = await resp.json();
+        
+        if (data.mappings) {
+            defaultMappings = data.mappings;
+            // 从后端加载用户自定义映射
+            customMappings = data.custom_mappings || {};
+            renderMappingPanel();
+        }
+    } catch (e) {
+        console.error('加载映射配置失败:', e);
+    }
+}
+
+function renderMappingPanel() {
+    const content = document.getElementById('mappingContent');
+    const system = document.getElementById('plotSystem').value;
+    
+    if (!system) {
+        content.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:20px;">请先选择系统</div>';
+        return;
+    }
+    
+    const sysMappings = defaultMappings;
+    const customSysMappings = customMappings[system] || {};
+    
+    const fields = Object.keys(sysMappings);
+    if (fields.length === 0) {
+        content.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:20px;">该系统无需要映射的字段</div>';
+        return;
+    }
+    
+    let html = '';
+    for (const field of fields) {
+        const defaultMap = sysMappings[field];
+        const customMap = customSysMappings[field] || {};
+        
+        html += `
+            <div class="mapping-group" data-name="${field.toLowerCase()}" style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #eee;">
+                <div style="font-size:12px;color:#333;margin-bottom:6px;font-weight:500;">${field}</div>
+                <div style="display:flex;flex-direction:column;gap:4px;">
+        `;
+        
+        for (const [textVal, defaultNum] of Object.entries(defaultMap)) {
+            const customNum = customMap[textVal] !== undefined ? customMap[textVal] : defaultNum;
+            html += `
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="font-size:11px;color:#666;width:60px;">${textVal}</span>
+                    <input type="number" value="${customNum}" 
+                           onchange="updateMapping('${field}', '${textVal}', this.value)"
+                           style="flex:1;padding:2px 4px;font-size:11px;border:1px solid #ddd;border-radius:2px;">
+                </div>
+            `;
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    content.innerHTML = html;
+}
+
+function filterMappingFields() {
+    const searchVal = (document.getElementById('mappingSearch').value || '').toLowerCase();
+    const groups = document.querySelectorAll('.mapping-group');
+    
+    groups.forEach(group => {
+        const fieldName = group.dataset.name || '';
+        group.style.display = !searchVal || fieldName.includes(searchVal) ? '' : 'none';
+    });
+}
+
+function updateMapping(field, textVal, numVal) {
+    const system = document.getElementById('plotSystem').value;
+    if (!system) return;
+    
+    const num = parseInt(numVal);
+    if (isNaN(num)) return;
+    
+    if (!customMappings[system]) {
+        customMappings[system] = {};
+    }
+    if (!customMappings[system][field]) {
+        customMappings[system][field] = {};
+    }
+    customMappings[system][field][textVal] = num;
+}
+
+async function saveMappings() {
+    const system = document.getElementById('plotSystem').value;
+    if (!system) {
+        alert('请先选择系统');
+        return;
+    }
+    
+    try {
+        const resp = await fetch('/api/save_mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ system: system, mappings: customMappings })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            alert('映射配置已保存到服务器');
+            // 重新加载映射以确保同步
+            loadMappings();
+        } else {
+            alert('保存失败: ' + (data.message || '未知错误'));
+        }
+    } catch (e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+async function resetMappings() {
+    const system = document.getElementById('plotSystem').value;
+    if (!system) {
+        alert('请先选择系统');
+        return;
+    }
+    
+    // 清除本地自定义映射
+    customMappings = {};
+    
+    // 调用后端重置
+    try {
+        const resp = await fetch('/api/save_mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ system: system, mappings: {} })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            // 重新加载映射
+            loadMappings();
+            alert('映射配置已重置为默认值');
+        } else {
+            alert('重置失败: ' + (data.message || '未知错误'));
+        }
+    } catch (e) {
+        alert('重置失败: ' + e.message);
+    }
+}
+
+function getMappedValue(field, value) {
+    // 如果已经是数值，直接返回
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+        return num;
+    }
+    
+    // 如果是字符串，查找映射
+    const system = document.getElementById('plotSystem').value;
+    if (!system || typeof value !== 'string') {
+        return null;
+    }
+    
+    // 优先使用用户自定义映射
+    if (customMappings[system] && customMappings[system][field] && 
+        customMappings[system][field][value] !== undefined) {
+        return customMappings[system][field][value];
+    }
+    
+    // 否则使用默认映射
+    if (defaultMappings[field] && defaultMappings[field][value] !== undefined) {
+        return defaultMappings[field][value];
+    }
+    
+    return null;
+}
+
+function renderPlotFieldList(fields) {
+    const fieldList = document.getElementById('plotFieldList');
+    fieldList.innerHTML = fields.map(f => {
+        const checked = plotSelectedFields.includes(f) ? 'checked' : '';
+        return `
+            <label style="display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" value="${f}" ${checked} style="accent-color:#1976d2;"> ${f}
+            </label>
+        `;
+    }).join('');
+    
+    // 添加事件监听
+    fieldList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', e => {
+            const field = e.target.value;
+            if (e.target.checked) {
+                if (!plotSelectedFields.includes(field)) {
+                    plotSelectedFields.push(field);
+                }
+            } else {
+                plotSelectedFields = plotSelectedFields.filter(f => f !== field);
+            }
+        });
+    });
+}
+
+function filterPlotFields() {
+    const searchText = document.getElementById('plotFieldSearch').value.toLowerCase();
+    if (!searchText) {
+        renderPlotFieldList(allPlotFields);
+        return;
+    }
+    const filtered = allPlotFields.filter(f => f.toLowerCase().includes(searchText));
+    renderPlotFieldList(filtered);
+}
+
+function selectAllPlotFields() {
+    plotSelectedFields = [...allPlotFields];
+    renderPlotFieldList(allPlotFields);
+}
+
+function clearAllPlotFields() {
+    plotSelectedFields = [];
+    renderPlotFieldList(allPlotFields);
+}
+
+function clearPlotSelection() {
+    document.getElementById('plotSystem').value = '';
+    document.getElementById('plotFieldSearch').value = '';
+    document.getElementById('plotFieldList').innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">请选择系统</div>';
+    allPlotFields = [];
+    plotSelectedFields = [];  // 清空选中状态
+    
+    // 清空图表
+    const resultDiv = document.getElementById('plotResult');
+    document.getElementById('plotInfo').textContent = '';
+    resultDiv.innerHTML = '<div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #999;">请选择系统和字段后绘制图表</div>';
+}
+
+let chartInstance = null;  // ECharts 实例
+
+async function drawPlot() {
+    const system = document.getElementById('plotSystem').value;
+    const plotType = document.getElementById('plotType').value;
+    
+    // 使用全局选中状态
+    const selectedFields = plotSelectedFields;
+    
+    if (!system) { alert('请选择系统'); return; }
+    if (!selectedFields.length) { alert('请选择至少一个字段'); return; }
+    if (!currentSessionId) { alert('请先上传日志'); return; }
+    
+    // 验证图表类型和字段数量
+    if (plotType === 'histogram' && selectedFields.length !== 1) {
+        alert('直方图仅支持单字段');
+        document.getElementById('plotType').value = 'line';
+        return;
+    }
+    if (plotType === 'scatter' && selectedFields.length < 2) {
+        alert('散点图需要至少两个字段');
+        document.getElementById('plotType').value = 'line';
+        return;
+    }
+    
+    try {
+        const resp = await fetch('/api/plot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                system: system,
+                fields: selectedFields,
+                plot_type: plotType
+            })
+        });
+        
+        const data = await resp.json();
+        if (resp.ok && data.timestamps) {
+            const infoDiv = document.getElementById('plotInfo');
+            infoDiv.textContent = `共 ${data.record_count} 条记录 | 字段: ${selectedFields.join(', ')}`;
+            
+            // 显示状态条
+            renderStatusBar(data.system_states);
+            
+            // 显示事件列表
+            renderEventList(data.events);
+            
+            // 使用 ECharts 渲染图表（包含事件标记）
+            renderChart(data);
+        } else {
+            alert('绘图失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (e) {
+        alert('绘图失败: ' + e.message);
+    }
+}
+
+function renderStatusBar(states) {
+    const statusBar = document.getElementById('statusBar');
+    const statusItems = document.getElementById('statusItems');
+    
+    if (!states || states.length === 0) {
+        statusBar.style.display = 'none';
+        return;
+    }
+    
+    const statusColors = {
+        normal: '#52c41a',
+        warning: '#faad14',
+        error: '#ff4d4f',
+        offline: '#d9d9d9'
+    };
+    
+    const statusLabels = {
+        normal: '正常',
+        warning: '警告',
+        error: '异常',
+        offline: '离线'
+    };
+    
+    statusItems.innerHTML = states.map(s => `
+        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #f5f5f5; border-radius: 4px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${statusColors[s.status] || '#d9d9d9'};"></span>
+            <span style="font-size: 12px; color: #666;">${s.name}</span>
+            <span style="font-size: 11px; color: ${statusColors[s.status] || '#999'}; font-weight: 500;">${statusLabels[s.status] || '未知'}</span>
+        </div>
+    `).join('');
+    
+    statusBar.style.display = 'block';
+}
+
+function renderEventList(events) {
+    const eventList = document.getElementById('eventList');
+    const eventItems = document.getElementById('eventItems');
+    
+    if (!events || events.length === 0) {
+        eventList.style.display = 'none';
+        return;
+    }
+    
+    const eventColors = {
+        warning: '#faad14',
+        error: '#ff4d4f',
+        info: '#1890ff'
+    };
+    
+    eventItems.innerHTML = events.map((e, idx) => `
+        <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid #f0f0f0; ${idx === events.length - 1 ? 'border-bottom: none;' : ''}">
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${eventColors[e.type] || '#1890ff'};"></span>
+            <span style="font-size: 11px; color: #888; flex-shrink: 0;">${e.time}</span>
+            <span style="font-size: 12px; color: #333;">${e.message}</span>
+        </div>
+    `).join('');
+    
+    eventList.style.display = 'block';
+}
+
+function renderChart(data) {
+    const container = document.getElementById('plotResult');
+    container.innerHTML = '<div id="chartContainer" style="width:100%;height:100%;"></div>';
+    
+    // 初始化 ECharts
+    if (chartInstance) {
+        chartInstance.dispose();
+    }
+    chartInstance = echarts.init(document.getElementById('chartContainer'));
+    
+    // 定义颜色
+    const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4'];
+    
+    let option = {};
+    
+    // 处理数据：将文字值映射为数值
+    const processedData = {};
+    for (const field of data.fields) {
+        processedData[field] = data.data[field].map(v => {
+            if (v === null) return null;
+            return getMappedValue(field, v);
+        });
+    }
+    
+    if (data.plot_type === 'histogram') {
+        // 直方图
+        const field = data.fields[0];
+        const values = processedData[field].filter(v => v !== null);
+        
+        option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' }
+            },
+            legend: {
+                data: [field]
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'value',
+                name: field,
+                axisLabel: { rotate: 45 }
+            },
+            yAxis: {
+                type: 'value',
+                name: '频数'
+            },
+            series: [{
+                name: field,
+                type: 'histogram',
+                data: values,
+                color: colors[0],
+                barWidth: '60%'
+            }]
+        };
+    } else if (data.plot_type === 'scatter') {
+        // 散点图
+        const xField = data.fields[0];
+        const yField = data.fields[1];
+        const points = [];
+        
+        for (let i = 0; i < data.timestamps.length; i++) {
+            const x = processedData[xField][i];
+            const y = processedData[yField][i];
+            if (x !== null && y !== null) {
+                points.push([x, y]);
+            }
+        }
+        
+        option = {
+            tooltip: {
+                trigger: 'item',
+                formatter: (params) => `${xField}: ${params.data[0]}<br/>${yField}: ${params.data[1]}`
+            },
+            legend: {
+                data: [`${xField} vs ${yField}`]
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'value',
+                name: xField
+            },
+            yAxis: {
+                type: 'value',
+                name: yField
+            },
+            series: [{
+                name: `${xField} vs ${yField}`,
+                type: 'scatter',
+                data: points,
+                symbolSize: 8,
+                itemStyle: { color: colors[0] }
+            }]
+        };
+    } else {
+        // 曲线图（默认）
+        const series = data.fields.map((field, index) => ({
+            name: field,
+            type: 'line',
+            data: processedData[field],
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 4,
+            lineStyle: { width: 2, color: colors[index % colors.length] },
+            itemStyle: { color: colors[index % colors.length] },
+            emphasis: {
+                focus: 'series',
+                itemStyle: { borderWidth: 2 }
+            }
+        }));
+        
+        // 添加事件标记线
+        if (data.events && data.events.length > 0) {
+            const eventMarkLine = {
+                name: '事件标记',
+                type: 'line',
+                data: [],
+                markLine: {
+                    silent: false,
+                    symbol: 'none',
+                    lineStyle: {
+                        color: '#ff4d4f',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    label: {
+                        show: true,
+                        position: 'end',
+                        formatter: '⚠',
+                        color: '#ff4d4f',
+                        fontSize: 14
+                    },
+                    data: data.events.map(e => ({
+                        xAxis: e.time,
+                        label: { formatter: '⚠' }
+                    }))
+                },
+                lineStyle: { show: false },
+                itemStyle: { show: false }
+            };
+            series.push(eventMarkLine);
+        }
+        
+        option = {
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                borderColor: '#ddd',
+                borderWidth: 1,
+                textStyle: { color: '#333' },
+                formatter: (params) => {
+                    let html = `<div style="font-weight:bold;margin-bottom:8px;">${params[0].axisValue}</div>`;
+                    params.forEach(param => {
+                        if (param.seriesName !== '事件标记') {
+                            html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${param.color};"></span>
+                                <span>${param.seriesName}: </span>
+                                <span style="font-weight:bold;">${param.value !== null ? param.value : '-'}</span>
+                            </div>`;
+                        }
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                data: data.fields.filter(f => f !== '事件标记'),
+                top: 10
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '15%',
+                top: '12%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'category',
+                data: data.timestamps,
+                name: '时间',
+                axisLabel: {
+                    rotate: 45,
+                    fontSize: 11
+                },
+                axisTick: { alignWithLabel: true }
+            },
+            yAxis: {
+                type: 'value',
+                name: '数值',
+                splitLine: {
+                    lineStyle: { type: 'dashed', color: '#eee' }
+                }
+            },
+            dataZoom: [
+                {
+                    type: 'inside',
+                    start: 0,
+                    end: 100
+                },
+                {
+                    type: 'slider',
+                    start: 0,
+                    end: 100,
+                    height: 20,
+                    bottom: 10
+                }
+            ],
+            series: series
+        };
+    }
+    
+    chartInstance.setOption(option);
+    
+    // 响应窗口大小变化
+    window.addEventListener('resize', () => {
+        chartInstance && chartInstance.resize();
+    });
+}
+
+// 更新系统选择时同步到绘图面板
+function syncPlotSystem() {
+    const plotSystem = document.getElementById('plotSystem');
+    plotSystem.innerHTML = '<option value="">请选择系统</option>' + 
+        selectedSystems.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+</script>
+
+</body>
+</html>

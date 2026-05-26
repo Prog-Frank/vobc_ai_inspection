@@ -1,0 +1,5 @@
+﻿,帧头,,,帧体,,,,
+Bytes0~Bytes1,Bytes2~Bytes9,Bytes10,Bytes11,Bytes12~Bytes13,Bytes14,Bytes15~Bytes18,Bytes,Bytes
+帧长度,时间长度,红网/蓝网,"正常帧（55）
+OR
+冗余帧（AA）",帧体长度（不包含长度字段本身）,帧标识符,控制周期序列号,数据内容,CRC校验码

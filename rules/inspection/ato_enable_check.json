@@ -1,0 +1,13 @@
+{
+    "name": "ATO使能状态检查",
+    "category": "驾驶模式",
+    "system": "ATO应用",
+    "severity": "warning",
+    "type": "single_frame",
+    "logic": "and",
+    "conditions": [
+        {"field": "ATO使能", "op": "eq", "value": "0"}
+    ],
+    "message": "ATO未使能",
+    "suggestion": "检查ATP是否给ATO使能信号"
+}
